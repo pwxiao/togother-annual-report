@@ -1,4 +1,5 @@
 import { motion, useScroll, useTransform } from "framer-motion";
+import { useState } from "react";
 import { 
   Calendar, 
   Eye, 
@@ -24,6 +25,7 @@ import { SearchKeywordCloud } from "@/components/annual-report/SearchKeywordClou
 import { CoupleCard } from "@/components/annual-report/CoupleCard";
 import { ProgressRing } from "@/components/annual-report/ProgressRing";
 import { AnimatedCounter } from "@/components/annual-report/AnimatedCounter";
+import { AuthGate } from "@/components/annual-report/AuthGate";
 
 import heroIllustration from "@/assets/hero-illustration.png";
 import activityIllustration from "@/assets/activity-illustration.png";
@@ -131,9 +133,20 @@ const mockData = {
 const monthNames = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"];
 
 const Index = () => {
+  const [isAuthorized, setIsAuthorized] = useState(false);
   const { scrollYProgress } = useScroll();
   const heroOpacity = useTransform(scrollYProgress, [0, 0.15], [1, 0]);
   const heroScale = useTransform(scrollYProgress, [0, 0.15], [1, 0.95]);
+
+  if (!isAuthorized) {
+    return (
+      <AuthGate 
+        onAuthorize={() => setIsAuthorized(true)}
+        year={mockData.year}
+        username={mockData.user.username}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
