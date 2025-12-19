@@ -24,14 +24,14 @@ export const AuthGate = ({ onAuthorize, year, username }: AuthGateProps) => {
   const permissions = [
     { icon: Shield, text: "访问你的年度观影数据" },
     { icon: Lock, text: "查看你的社交互动记录" },
-    { icon: Sparkles, text: "展示你的积分与成就" },
+
   ];
 
   return (
     <AnimatePresence>
       {!isOpening && (
         <motion.div
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center gradient-hero overflow-hidden"
+          className="fixed inset-0 z-50 gradient-hero overflow-y-auto"
           exit={{ 
             clipPath: "circle(0% at 50% 50%)",
             transition: { duration: 0.8, ease: [0.4, 0, 0.2, 1] }
@@ -65,12 +65,14 @@ export const AuthGate = ({ onAuthorize, year, username }: AuthGateProps) => {
             <div className="absolute right-0 top-0 w-1 h-full bg-gradient-to-b from-transparent via-primary/20 to-transparent" />
           </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-            className="w-full max-w-md mx-auto px-6 text-center"
-          >
+          {/* Content wrapper with flexbox for centering when content is small */}
+          <div className="min-h-full flex flex-col items-center justify-center py-8 md:py-12">
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="w-full max-w-md mx-auto px-6 text-center"
+            >
             {/* Logo */}
             <motion.div
               initial={{ scale: 0.8, opacity: 0 }}
@@ -78,10 +80,7 @@ export const AuthGate = ({ onAuthorize, year, username }: AuthGateProps) => {
               transition={{ duration: 0.5, delay: 0.2 }}
               className="mb-8"
             >
-              <div className="inline-flex items-center gap-2 bg-card/90 backdrop-blur-sm px-5 py-2.5 rounded-full shadow-elevated border border-border/50">
-                <Tv className="w-6 h-6 text-primary" />
-                <span className="font-bold text-lg text-foreground">一起看</span>
-              </div>
+            
             </motion.div>
 
             {/* Year Badge */}
@@ -111,7 +110,7 @@ export const AuthGate = ({ onAuthorize, year, username }: AuthGateProps) => {
               transition={{ delay: 0.5, duration: 0.5 }}
               className="text-muted-foreground mb-8"
             >
-              {username}，这一年你在一起看的精彩时刻
+              {username}，这一年你在Togother的精彩时刻
             </motion.p>
 
             {/* Illustration */}
@@ -192,7 +191,7 @@ export const AuthGate = ({ onAuthorize, year, username }: AuthGateProps) => {
                   className="text-sm text-muted-foreground leading-relaxed"
                   onClick={() => setIsAgreed(!isAgreed)}
                 >
-                  我同意授权一起看访问我的数据以生成年度报告，并已阅读
+                  我同意授权Togother访问我的数据以生成年度报告，并已阅读
                   <a href="#" className="text-primary hover:underline">《隐私政策》</a>
                 </span>
               </motion.label>
@@ -234,7 +233,8 @@ export const AuthGate = ({ onAuthorize, year, username }: AuthGateProps) => {
             >
               您的数据仅用于生成报告，我们承诺保护您的隐私安全
             </motion.p>
-          </motion.div>
+            </motion.div>
+          </div>
         </motion.div>
       )}
 

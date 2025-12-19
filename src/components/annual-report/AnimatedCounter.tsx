@@ -17,12 +17,31 @@ export const AnimatedCounter = ({
   prefix = "",
   className = ""
 }: AnimatedCounterProps) => {
-  const [count, setCount] = useState(0);
+  // 确保 value 是数字类型
+  const numValue = typeof value === 'number' ? value : Number(value) || 0;
+  
+  // 初始值设置为传入的 value，这样即使值为0也能立即显示
+  const [count, setCount] = useState(numValue);
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, margin: "-100px" });
+  
+  // 当 value 变化时，立即更新 count
+  useEffect(() => {
+    setCount(numValue);
+  }, [numValue]);
 
   useEffect(() => {
-    if (!isInView) return;
+    if (!isInView) {
+      // 如果不在视图中，直接设置为当前值（包括0）
+      setCount(numValue);
+      return;
+    }
+
+    // 如果值为0，直接设置为0，不需要动画
+    if (numValue === 0) {
+      setCount(0);
+      return;
+    }
 
     let startTime: number;
     let animationFrame: number;
@@ -33,24 +52,34 @@ export const AnimatedCounter = ({
       
       // Easing function for smooth animation
       const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-      setCount(Math.floor(easeOutQuart * value));
+      setCount(Math.floor(easeOutQuart * numValue));
 
       if (progress < 1) {
         animationFrame = requestAnimationFrame(animate);
+      } else {
+        // 确保最终值正确
+        setCount(numValue);
       }
     };
 
     animationFrame = requestAnimationFrame(animate);
 
-    return () => cancelAnimationFrame(animationFrame);
-  }, [value, duration, isInView]);
+    return () => {
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [numValue, duration, isInView]);
+
+  // 如果值为0或不在视图中，直接显示，不等待动画
+  const shouldShowImmediately = numValue === 0 || !isInView;
 
   return (
     <motion.span
       ref={ref}
       className={className}
-      initial={{ opacity: 0, y: 10 }}
-      animate={isInView ? { opacity: 1, y: 0 } : {}}
+      initial={shouldShowImmediately ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
+      animate={isInView || shouldShowImmediately ? { opacity: 1, y: 0 } : {}}
       transition={{ duration: 0.4 }}
     >
       {prefix}{count.toLocaleString()}{suffix}

@@ -1,5 +1,5 @@
 import { motion, useScroll, useTransform } from "framer-motion";
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Calendar, 
   Eye, 
@@ -16,7 +16,9 @@ import {
   Home,
   Award,
   Sparkles,
-  ChevronDown
+  ChevronDown,
+  Loader2,
+  AlertCircle
 } from "lucide-react";
 import { StatCard } from "@/components/annual-report/StatCard";
 import { SectionHeader } from "@/components/annual-report/SectionHeader";
@@ -26,126 +28,183 @@ import { CoupleCard } from "@/components/annual-report/CoupleCard";
 import { ProgressRing } from "@/components/annual-report/ProgressRing";
 import { AnimatedCounter } from "@/components/annual-report/AnimatedCounter";
 import { AuthGate } from "@/components/annual-report/AuthGate";
+import { checkToken, setupTokenListeners, pollForToken, TokenSource } from "@/lib/token";
+import { fetchAnnualReport, AnnualReportData, getMockData } from "@/lib/api";
+import {
+  getActiveMonthEvaluation,
+  getActiveDaysEvaluation,
+  getConsecutiveCheckInEvaluation,
+  getTotalAccessEvaluation,
+  getSocialEvaluation,
+  getContentEvaluation,
+  getWatchingEvaluation,
+  getPointsEvaluation,
+  getSearchEvaluation,
+  getCoupleEvaluation
+} from "@/lib/evaluations";
 
 import heroIllustration from "@/assets/hero-illustration.png";
-import activityIllustration from "@/assets/activity-illustration.png";
 import socialIllustration from "@/assets/social-illustration.png";
 import pointsIllustration from "@/assets/points-illustration.png";
 import searchIllustration from "@/assets/search-illustration.png";
-
-// Mock data based on the API response structure
-const mockData = {
-  year: 2024,
-  user: {
-    id: 1,
-    username: "小明",
-    avatar_url: null,
-    registered_at: "2023-06-15T10:30:00",
-    is_vip: true,
-    vip_expire_at: "2025-06-15T10:30:00"
-  },
-  overview: {
-    active_days: 186,
-    total_access: 1247,
-    most_active_month: 8,
-    most_active_month_access: 203
-  },
-  activity: {
-    monthly_trend: [
-      { month: "2024-01", total_access: 89, active_days: 15 },
-      { month: "2024-02", total_access: 102, active_days: 18 },
-      { month: "2024-03", total_access: 95, active_days: 14 },
-      { month: "2024-04", total_access: 78, active_days: 12 },
-      { month: "2024-05", total_access: 112, active_days: 19 },
-      { month: "2024-06", total_access: 134, active_days: 21 },
-      { month: "2024-07", total_access: 156, active_days: 23 },
-      { month: "2024-08", total_access: 203, active_days: 26 },
-      { month: "2024-09", total_access: 98, active_days: 16 },
-      { month: "2024-10", total_access: 87, active_days: 14 },
-      { month: "2024-11", total_access: 93, active_days: 15 },
-      { month: "2024-12", total_access: 0, active_days: 0 },
-    ],
-    check_ins: {
-      total: 142,
-      max_consecutive_days: 28,
-      last_check_in: "2024-11-18"
-    }
-  },
-  social: {
-    following_count: 67,
-    followers_count: 89,
-    chat_sessions_count: 23,
-    messages_count: 456
-  },
-  content: {
-    rooms_created: 12,
-    reviews_count: 34
-  },
-  watching: {
-    favorites_count: 156,
-    rooms_joined: 45
-  },
-  points: {
-    total_points: 2680,
-    available_points: 1850,
-    used_points: 830,
-    year_earned: 2150,
-    year_used: 830,
-    sources: [
-      { type: "daily_check_in", points: 1420 },
-      { type: "watching", points: 450 },
-      { type: "social_interaction", points: 280 }
-    ]
-  },
-  search: {
-    total_searches: 328,
-    top_keywords: [
-      { keyword: "爱情电影", count: 45 },
-      { keyword: "科幻片", count: 38 },
-      { keyword: "动漫", count: 32 },
-      { keyword: "喜剧", count: 28 },
-      { keyword: "恐怖", count: 24 },
-      { keyword: "悬疑剧", count: 22 },
-      { keyword: "纪录片", count: 18 },
-      { keyword: "音乐会", count: 15 }
-    ],
-    top_sources: [
-      { source_url: "source1.com", count: 120 },
-      { source_url: "source2.com", count: 89 }
-    ],
-    monthly_trend: [],
-    most_active_month: 7,
-    most_active_month_count: 52
-  },
-  couple: {
-    has_couple: true,
-    partner: {
-      id: 2,
-      username: "小红",
-      avatar_url: null
-    },
-    anniversary_date: "2024-02-14",
-    days_together: 278,
-    created_at: "2024-02-14T20:00:00"
-  }
-};
 
 const monthNames = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"];
 
 const Index = () => {
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reportData, setReportData] = useState<AnnualReportData | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [tokenSource, setTokenSource] = useState<TokenSource>(null);
+  const cleanupRef = useRef<(() => void)[]>([]);
+  
   const { scrollYProgress } = useScroll();
   const heroOpacity = useTransform(scrollYProgress, [0, 0.15], [1, 0]);
   const heroScale = useTransform(scrollYProgress, [0, 0.15], [1, 0.95]);
 
-  if (!isAuthorized) {
+  // 获取年度报告数据
+  const fetchReportData = useCallback(async (tokenValue: string) => {
+    if (!tokenValue) {
+      setError("未检测到登录信息");
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const data = await fetchAnnualReport(tokenValue);
+      setReportData(data);
+      // 不自动授权，等待用户点击授权门控
+    } catch (e) {
+      console.error('API Error', e);
+      const errorMessage = e instanceof Error ? e.message : "无法连接到服务器";
+      setError(errorMessage);
+      
+      // 开发环境下使用 mock 数据作为降级方案
+      if (import.meta.env.DEV) {
+        console.warn('使用 mock 数据作为降级方案');
+        setReportData(getMockData());
+        setError(null);
+        // 不自动授权，等待用户点击授权门控
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // 处理 token 获取
+  const handleTokenReceived = useCallback((tokenValue: string, source: TokenSource) => {
+    setToken(tokenValue);
+    setTokenSource(source);
+    fetchReportData(tokenValue);
+  }, [fetchReportData]);
+
+  useEffect(() => {
+    // 清理函数
+    const cleanup = () => {
+      cleanupRef.current.forEach(fn => fn());
+      cleanupRef.current = [];
+    };
+
+    // 设置 token 监听器
+    const removeListeners = setupTokenListeners(handleTokenReceived);
+    cleanupRef.current.push(removeListeners);
+
+    // 立即检查 token
+    const tokenInfo = checkToken();
+    if (tokenInfo.token) {
+      handleTokenReceived(tokenInfo.token, tokenInfo.source);
+    } else {
+      // 轮询获取 token
+      const removePolling = pollForToken(handleTokenReceived, 10, 500);
+      cleanupRef.current.push(removePolling);
+      
+      // 如果轮询失败，设置错误状态
+      const timeoutId = setTimeout(() => {
+        setIsLoading(prev => {
+          if (prev && !token) {
+            setError("请在 App 内打开");
+            return false;
+          }
+          return prev;
+        });
+      }, 5000);
+      
+      cleanupRef.current.push(() => clearTimeout(timeoutId));
+    }
+
+    return cleanup;
+  }, [handleTokenReceived]);
+
+  // 加载状态
+  if (isLoading && !reportData) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-primary animate-spin mx-auto mb-4" />
+          <p className="text-muted-foreground">加载年度报告中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 错误状态（且没有降级数据）
+  if (error && !reportData) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-12 h-12 text-destructive mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-foreground mb-2">加载失败</h2>
+          <p className="text-muted-foreground mb-4">{error}</p>
+          
+          
+          <button
+            onClick={() => {
+              const tokenInfo = checkToken();
+              if (tokenInfo.token) {
+                fetchReportData(tokenInfo.token);
+              } else if (import.meta.env.DEV) {
+                console.log('当前没有 token，请在控制台使用 window.setAppToken() 设置');
+              }
+            }}
+            className="gradient-primary text-primary-foreground px-6 py-2 rounded-full font-semibold"
+          >
+            重试
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 授权门控：如果有数据但未授权，显示授权门控
+  if (reportData && !isAuthorized) {
     return (
       <AuthGate 
         onAuthorize={() => setIsAuthorized(true)}
-        year={mockData.year}
-        username={mockData.user.username}
+        year={reportData.year}
+        username={reportData.user.username}
       />
     );
+  }
+
+  // 如果没有数据且没有错误，可能是还在加载或等待 token
+  if (!reportData && !error) {
+    return null;
+  }
+
+  // 如果没有数据但有错误，显示错误（已在上面处理）
+  if (!reportData) {
+    return null;
+  }
+
+  // 开发环境下输出调试信息
+  if (import.meta.env.DEV) {
+    console.log('页面渲染时的 social 数据:', reportData.social);
+    console.log('following_count:', reportData.social.following_count, typeof reportData.social.following_count);
+    console.log('chat_sessions_count:', reportData.social.chat_sessions_count, typeof reportData.social.chat_sessions_count);
   }
 
   return (
@@ -185,10 +244,7 @@ const Index = () => {
             transition={{ duration: 0.5 }}
             className="mb-6"
           >
-            <div className="inline-flex items-center gap-2 bg-card px-4 py-2 rounded-full shadow-card">
-              <Tv className="w-5 h-5 text-primary" />
-              <span className="font-semibold text-foreground">一起看</span>
-            </div>
+  
           </motion.div>
 
           <motion.h1
@@ -197,7 +253,7 @@ const Index = () => {
             transition={{ delay: 0.2, duration: 0.6 }}
             className="text-5xl md:text-7xl font-bold text-foreground mb-4"
           >
-            {mockData.year}
+            {reportData.year}
           </motion.h1>
           
           <motion.p
@@ -216,12 +272,34 @@ const Index = () => {
             transition={{ delay: 0.4, duration: 0.5 }}
             className="flex flex-col items-center gap-4 mb-8"
           >
-            <div className="w-24 h-24 rounded-full gradient-primary flex items-center justify-center text-primary-foreground text-3xl font-bold shadow-elevated">
-              {mockData.user.username.charAt(0)}
+            <div className="w-24 h-24 rounded-full overflow-hidden shadow-elevated border-4 border-primary/20 relative bg-gradient-to-br from-primary to-secondary">
+              {reportData.user.avatar_url && reportData.user.avatar_url.trim() ? (
+                <img 
+                  src={reportData.user.avatar_url} 
+                  alt={reportData.user.username}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    // 如果图片加载失败，隐藏图片，显示首字母
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent) {
+                      const fallback = parent.querySelector('.avatar-fallback') as HTMLElement;
+                      if (fallback) fallback.style.display = 'flex';
+                    }
+                  }}
+                />
+              ) : null}
+              <div 
+                className="avatar-fallback absolute inset-0 gradient-primary flex items-center justify-center text-primary-foreground text-3xl font-bold"
+                style={{ display: (!reportData.user.avatar_url || !reportData.user.avatar_url.trim()) ? 'flex' : 'none' }}
+              >
+                {reportData.user.username.charAt(0)}
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xl font-semibold text-foreground">{mockData.user.username}</span>
-              {mockData.user.is_vip && (
+              <span className="text-xl font-semibold text-foreground">{reportData.user.username}</span>
+              {reportData.user.is_vip && (
                 <span className="px-2 py-0.5 bg-secondary text-secondary-foreground text-xs font-medium rounded-full">
                   VIP
                 </span>
@@ -238,7 +316,7 @@ const Index = () => {
           >
             <img 
               src={heroIllustration} 
-              alt="一起看 年度报告" 
+              alt="Togother 年度报告" 
               className="w-full rounded-2xl shadow-card"
             />
           </motion.div>
@@ -266,14 +344,26 @@ const Index = () => {
       <section className="py-20 px-4 md:px-8 max-w-6xl mx-auto">
         <SectionHeader 
           title="年度概览" 
-          subtitle="这一年，你在一起看的足迹"
+          subtitle="这一年，你在Togother的足迹"
         />
+        
+        {reportData.overview.total_access > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.4 }}
+            className="mb-6 text-sm text-muted-foreground text-center"
+          >
+            {getTotalAccessEvaluation(reportData.overview.total_access)}
+          </motion.div>
+        )}
         
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
           <StatCard 
             icon={Calendar} 
             label="活跃天数" 
-            value={mockData.overview.active_days}
+            value={reportData.overview.active_days}
             suffix=" 天"
             gradient="primary"
             delay={0}
@@ -281,7 +371,7 @@ const Index = () => {
           <StatCard 
             icon={Eye} 
             label="总访问次数" 
-            value={mockData.overview.total_access}
+            value={reportData.overview.total_access}
             suffix=" 次"
             gradient="secondary"
             delay={0.1}
@@ -289,7 +379,7 @@ const Index = () => {
           <StatCard 
             icon={Flame} 
             label="最活跃月份访问" 
-            value={mockData.overview.most_active_month_access}
+            value={reportData.overview.most_active_month_access}
             suffix=" 次"
             gradient="accent"
             delay={0.2}
@@ -297,7 +387,7 @@ const Index = () => {
           <StatCard 
             icon={Award} 
             label="连续打卡纪录" 
-            value={mockData.activity.check_ins.max_consecutive_days}
+            value={reportData.activity.check_ins.max_consecutive_days}
             suffix=" 天"
             gradient="success"
             delay={0.3}
@@ -314,11 +404,16 @@ const Index = () => {
         >
           <p className="text-muted-foreground mb-2">你最活跃的月份是</p>
           <h3 className="text-4xl font-bold text-gradient-primary">
-            {monthNames[mockData.overview.most_active_month - 1]}
+            {reportData.overview.most_active_month ? monthNames[reportData.overview.most_active_month - 1] : "暂无数据"}
           </h3>
           <p className="text-sm text-muted-foreground mt-2">
-            那个月你访问了 {mockData.overview.most_active_month_access} 次 🎉
+            {reportData.overview.most_active_month ? `那个月你访问了 ${reportData.overview.most_active_month_access} 次 🎉` : "暂无数据"}
           </p>
+          {reportData.overview.most_active_month && (
+            <p className="text-sm text-primary mt-3 font-medium">
+              {getActiveMonthEvaluation(reportData.overview.most_active_month)}
+            </p>
+          )}
         </motion.div>
       </section>
 
@@ -336,21 +431,32 @@ const Index = () => {
               title="活跃度分析" 
               subtitle="坚持带来改变，每一次打卡都是成长"
             />
+            {reportData.activity.check_ins.max_consecutive_days > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4 }}
+                className="mb-4 text-sm text-muted-foreground"
+              >
+                {getConsecutiveCheckInEvaluation(reportData.activity.check_ins.max_consecutive_days)}
+              </motion.div>
+            )}
             <div className="grid grid-cols-3 gap-4">
               <ProgressRing 
-                value={mockData.activity.check_ins.total}
+                value={reportData.activity.check_ins.total}
                 max={365}
                 label="年度打卡"
                 color="primary"
               />
               <ProgressRing 
-                value={mockData.activity.check_ins.max_consecutive_days}
+                value={reportData.activity.check_ins.max_consecutive_days}
                 max={30}
                 label="最长连续"
                 color="secondary"
               />
               <ProgressRing 
-                value={mockData.overview.active_days}
+                value={reportData.overview.active_days}
                 max={365}
                 label="活跃天数"
                 color="accent"
@@ -364,15 +470,11 @@ const Index = () => {
             transition={{ duration: 0.6 }}
             className="w-full md:w-64 flex-shrink-0"
           >
-            <img 
-              src={activityIllustration} 
-              alt="Activity" 
-              className="w-full max-w-[200px] mx-auto animate-float"
-            />
+         
           </motion.div>
         </div>
 
-        <ActivityChart data={mockData.activity.monthly_trend} />
+        <ActivityChart data={reportData.activity.monthly_trend} />
       </section>
 
       {/* Social Section */}
@@ -389,6 +491,21 @@ const Index = () => {
               title="社交互动" 
               subtitle="感谢陪伴，一起分享精彩"
             />
+            {(() => {
+              const socialTotal = reportData.social.following_count + reportData.social.followers_count + 
+                                 reportData.social.chat_sessions_count + reportData.social.messages_count;
+              return socialTotal > 0 ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.4 }}
+                  className="mt-4 text-sm text-muted-foreground"
+                >
+                  {getSocialEvaluation(reportData.social)}
+                </motion.div>
+              ) : null;
+            })()}
           </motion.div>
           <motion.div
             initial={{ opacity: 0, x: -30 }}
@@ -409,7 +526,7 @@ const Index = () => {
           <StatCard 
             icon={UserPlus} 
             label="新关注" 
-            value={mockData.social.following_count}
+            value={reportData.social.following_count}
             suffix=" 人"
             gradient="primary"
             delay={0}
@@ -417,7 +534,7 @@ const Index = () => {
           <StatCard 
             icon={Users} 
             label="新粉丝" 
-            value={mockData.social.followers_count}
+            value={reportData.social.followers_count}
             suffix=" 人"
             gradient="secondary"
             delay={0.1}
@@ -425,7 +542,7 @@ const Index = () => {
           <StatCard 
             icon={MessageCircle} 
             label="聊天会话" 
-            value={mockData.social.chat_sessions_count}
+            value={reportData.social.chat_sessions_count}
             suffix=" 个"
             gradient="accent"
             delay={0.2}
@@ -433,7 +550,7 @@ const Index = () => {
           <StatCard 
             icon={MessageCircle} 
             label="发送消息" 
-            value={mockData.social.messages_count}
+            value={reportData.social.messages_count}
             suffix=" 条"
             gradient="success"
             delay={0.3}
@@ -447,12 +564,26 @@ const Index = () => {
           title="内容与收藏" 
           subtitle="你创造和收藏的精彩内容"
         />
+        {(() => {
+          const contentTotal = reportData.content.rooms_created + reportData.content.reviews_count;
+          return contentTotal > 0 ? (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.4 }}
+              className="mb-6 text-sm text-muted-foreground text-center"
+            >
+              {getContentEvaluation(reportData.content)}
+            </motion.div>
+          ) : null;
+        })()}
         
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
           <StatCard 
             icon={Home} 
             label="创建房间" 
-            value={mockData.content.rooms_created}
+            value={reportData.content.rooms_created}
             suffix=" 个"
             gradient="primary"
             delay={0}
@@ -460,7 +591,7 @@ const Index = () => {
           <StatCard 
             icon={Star} 
             label="发布影评" 
-            value={mockData.content.reviews_count}
+            value={reportData.content.reviews_count}
             suffix=" 篇"
             gradient="secondary"
             delay={0.1}
@@ -468,7 +599,7 @@ const Index = () => {
           <StatCard 
             icon={Bookmark} 
             label="收藏视频" 
-            value={mockData.watching.favorites_count}
+            value={reportData.watching.favorites_count}
             suffix=" 个"
             gradient="accent"
             delay={0.2}
@@ -476,12 +607,27 @@ const Index = () => {
           <StatCard 
             icon={Tv} 
             label="加入房间" 
-            value={mockData.watching.rooms_joined}
+            value={reportData.watching.rooms_joined}
             suffix=" 个"
             gradient="success"
             delay={0.3}
           />
         </div>
+        
+        {(() => {
+          const watchingTotal = reportData.watching.favorites_count + reportData.watching.rooms_joined;
+          return watchingTotal > 0 ? (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.4 }}
+              className="mt-6 text-sm text-muted-foreground text-center"
+            >
+              {getWatchingEvaluation(reportData.watching)}
+            </motion.div>
+          ) : null;
+        })()}
       </section>
 
       {/* Points Section */}
@@ -498,6 +644,17 @@ const Index = () => {
               title="积分收获" 
               subtitle="每一分都是你努力的见证"
             />
+            {reportData.points.year_earned > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4 }}
+                className="mt-4 text-sm text-muted-foreground"
+              >
+                {getPointsEvaluation(reportData.points.year_earned)}
+              </motion.div>
+            )}
           </motion.div>
           <motion.div
             initial={{ opacity: 0, x: 30 }}
@@ -525,7 +682,7 @@ const Index = () => {
             <Trophy className="w-10 h-10 text-primary mx-auto mb-3" />
             <p className="text-sm text-muted-foreground mb-1">年度获得积分</p>
             <AnimatedCounter 
-              value={mockData.points.year_earned}
+              value={reportData.points.year_earned}
               className="text-3xl font-bold text-foreground"
             />
           </motion.div>
@@ -540,7 +697,7 @@ const Index = () => {
             <Sparkles className="w-10 h-10 text-secondary mx-auto mb-3" />
             <p className="text-sm text-muted-foreground mb-1">可用积分</p>
             <AnimatedCounter 
-              value={mockData.points.available_points}
+              value={reportData.points.available_points}
               className="text-3xl font-bold text-foreground"
             />
           </motion.div>
@@ -555,52 +712,11 @@ const Index = () => {
             <Award className="w-10 h-10 text-accent mx-auto mb-3" />
             <p className="text-sm text-muted-foreground mb-1">已使用积分</p>
             <AnimatedCounter 
-              value={mockData.points.year_used}
+              value={reportData.points.year_used}
               className="text-3xl font-bold text-foreground"
             />
           </motion.div>
         </div>
-
-        {/* Points Sources */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6, delay: 0.3 }}
-          className="mt-6 bg-card rounded-2xl p-6 shadow-card"
-        >
-          <h3 className="text-lg font-semibold text-foreground mb-4">积分来源</h3>
-          <div className="space-y-4">
-            {mockData.points.sources.map((source, index) => {
-              const percentage = (source.points / mockData.points.year_earned) * 100;
-              const labels: Record<string, string> = {
-                daily_check_in: "每日打卡",
-                watching: "观影奖励",
-                social_interaction: "社交互动"
-              };
-              return (
-                <div key={source.type}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-foreground">{labels[source.type] || source.type}</span>
-                    <span className="text-muted-foreground">{source.points} 积分</span>
-                  </div>
-                  <div className="h-2 bg-muted rounded-full overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      whileInView={{ width: `${percentage}%` }}
-                      viewport={{ once: true }}
-                      transition={{ duration: 1, delay: index * 0.1 }}
-                      className={`h-full rounded-full ${
-                        index === 0 ? "gradient-primary" : 
-                        index === 1 ? "gradient-secondary" : "gradient-accent"
-                      }`}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </motion.div>
       </section>
 
       {/* Search Section */}
@@ -617,6 +733,17 @@ const Index = () => {
               title="搜索印记" 
               subtitle="你的兴趣与偏好"
             />
+            {reportData.search.total_searches > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4 }}
+                className="mt-4 text-sm text-muted-foreground"
+              >
+                {getSearchEvaluation(reportData.search.total_searches)}
+              </motion.div>
+            )}
           </motion.div>
           <motion.div
             initial={{ opacity: 0, x: -30 }}
@@ -644,27 +771,40 @@ const Index = () => {
             <Search className="w-10 h-10 text-primary mx-auto mb-3" />
             <p className="text-sm text-muted-foreground mb-1">年度搜索次数</p>
             <AnimatedCounter 
-              value={mockData.search.total_searches}
+              value={reportData.search.total_searches}
               className="text-3xl font-bold text-foreground"
             />
           </motion.div>
 
-          <SearchKeywordCloud keywords={mockData.search.top_keywords} />
+          <SearchKeywordCloud keywords={reportData.search.top_keywords} />
         </div>
       </section>
 
       {/* Couple Section */}
       <section className="py-20 px-4 md:px-8 max-w-6xl mx-auto">
         <SectionHeader 
-          title="情侣空间" 
-          subtitle="最浪漫的事就是和你一起看"
+          title="最浪漫的事就是和Ta一起看啦～" 
+          subtitle=""
           align="center"
         />
         
+        {reportData.couple.has_couple && reportData.couple.days_together > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.4 }}
+            className="mb-6 text-sm text-muted-foreground text-center"
+          >
+            {getCoupleEvaluation(reportData.couple.days_together)}
+          </motion.div>
+        )}
+        
         <div className="max-w-md mx-auto">
           <CoupleCard 
-            couple={mockData.couple}
-            userName={mockData.user.username}
+            couple={reportData.couple}
+            userName={reportData.user.username}
+            userAvatar={reportData.user.avatar_url || undefined}
           />
         </div>
       </section>
@@ -682,7 +822,7 @@ const Index = () => {
             感谢你的陪伴
           </h2>
           <p className="text-muted-foreground mb-6">
-            {mockData.year + 1} 年，继续一起看更多精彩
+            {reportData.year + 1} 年，继续Togother更多精彩
           </p>
           <motion.button
             whileHover={{ scale: 1.05 }}
@@ -694,7 +834,7 @@ const Index = () => {
         </motion.div>
 
         <p className="text-sm text-muted-foreground mt-12">
-          © {mockData.year} 一起看 · 年度报告
+          © {reportData.year} Togother · 年度报告
         </p>
       </footer>
     </div>
