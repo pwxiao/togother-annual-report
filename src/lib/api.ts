@@ -301,7 +301,11 @@ export async function fetchAnnualReport(
   }
 
   const currentYear = year || new Date().getFullYear();
-  const apiUrl = import.meta.env.VITE_API_URL || 'https://togother.autooj.cn';
+  const apiUrl = import.meta.env.VITE_API_URL;
+  
+  if (!apiUrl) {
+    throw new Error('VITE_API_URL 环境变量未设置');
+  }
   
   try {
     const response = await axios.get<any>(
