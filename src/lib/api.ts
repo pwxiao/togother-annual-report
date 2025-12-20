@@ -304,7 +304,7 @@ export async function fetchAnnualReport(
   const apiUrl = import.meta.env.VITE_API_URL;
   
   if (!apiUrl) {
-    throw new Error('VITE_API_URL 环境变量未设置');
+    throw new Error('VITE_API_URL 未配置，请在构建时设置 API 地址');
   }
   
   try {

@@ -14,9 +14,7 @@ COPY . .
 
 # 构建参数：API URL
 ARG VITE_API_URL
-
-# 设置环境变量（Vite 需要以 VITE_ 开头）
-ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
 
 # 构建项目
 RUN npm run build
